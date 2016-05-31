@@ -68,6 +68,10 @@ If(-Not ($CredentialFile.Contains("\")))
     $PathCredentialFile = Split-Path $Script:MyInvocation.MyCommand.Path -Parent
     $PathCredentialFile += "\" + $CredentialFile
 }
+else
+{
+    $PathCredentialFile = $CredentialFile
+}
 
 Write-Host "Chemin du fichier : " $PathCredentialFile 
 
@@ -80,15 +84,28 @@ $VIServer = $credential.Host
 #Connexion au vsphere
 $connection = Connect-VIServer -Server $credential.Host -User $credential.User -Password $credential.Password -WarningAction SilentlyContinue
 
+#Récupération de la valeur de la langue pour le traitement de récupération de l'auteur d'un snapshot
+$ServiceInstance = Get-View ServiceInstance
+$SessionManager = Get-View $ServiceInstance.Content.SessionManager
+
+#Affiachage de la langue
+#Write-Host $SessionManager.DefaultLocale
+
 $Report = Get-VM | Get-Snapshot | Select VM,Name,Description,@{Label="Size";Expression={"{0:N2} GB" -f ($_.SizeGB)}},Created,@{Label="Created by";Expression={''}}
 
 foreach($snap in $Report) 
 {
-#Si le message est en français
-$snap.'Created by'= Get-VIEvent -entity (get-vm $snap.vm) -type info -MaxSamples 1000 | Where { $_.FullFormattedMessage.contains("Créer un snapshot de machine virtuelle")}| Select-Object -First 1 -ExpandProperty username
-#if the message is on English
-#$snap.'Created by'= Get-VIEvent -entity (get-vm $snap.vm) -type info -MaxSamples 1000 | Where { $_.FullFormattedMessage.contains("Create virtual machine snapshot")}| Select-Object -First 1 -ExpandProperty username 
-} 
+    #Si le message est en français
+    If($SessionManager.DefaultLocale.Contains("fr"))
+    {
+        $snap.'Created by'= Get-VIEvent -entity (get-vm $snap.vm) -type info -MaxSamples 1000 | Where { $_.FullFormattedMessage.contains("Créer un snapshot de machine virtuelle")}| Select-Object -First 1 -ExpandProperty username
+    }
+    #if the message is on English
+    ElseIf ($SessionManager.DefaultLocale.Contains("en"))
+    {
+        $snap.'Created by'= Get-VIEvent -entity (get-vm $snap.vm) -type info -MaxSamples 1000 | Where { $_.FullFormattedMessage.contains("Create virtual machine snapshot")}| Select-Object -First 1 -ExpandProperty username 
+    }
+}
 
 If (-not $Report)
 {  $Report = New-Object PSObject -Property @{
@@ -99,8 +116,6 @@ If (-not $Report)
       Created = ""
    }
 }
-
-
 
 $Report = $Report | Select VM,Name,Description,Size,Created,"Created by" | ConvertTo-Html -Head $Header -PreContent "<p><h2>Snapshot Report - $VIServer</h2></p><br>" | Set-AlternatingRows -CSSEvenClass even -CSSOddClass odd
 	
